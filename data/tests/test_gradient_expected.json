@@ -1,0 +1,30 @@
+{
+  "description": "parseNifti() \u2014 axis ordering and spacing match SimpleITKIO",
+  "dims_zyx": [
+    12,
+    16,
+    20
+  ],
+  "pixdim_zyx": [
+    1.0,
+    0.9375,
+    0.9375
+  ],
+  "nifti_dims_xyz": [
+    20,
+    16,
+    12
+  ],
+  "nifti_pixdim_xyz": [
+    0.9375,
+    0.9375,
+    1.0
+  ],
+  "spot_checks": {
+    "data[0]": 0.0,
+    "data[1]": 1.0,
+    "data[20]": 20.0,
+    "data[320]": 320.0,
+    "data[3839]": 3839.0
+  }
+}

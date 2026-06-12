@@ -1,0 +1,42 @@
+{
+  "description": "PreprocessAdapterFromNpy \u2014 resampleTrilinear + foregroundZScore",
+  "input": {
+    "nifti_dims_xyz": [
+      20,
+      16,
+      12
+    ],
+    "nifti_spacing_xyz": [
+      1.0,
+      1.0,
+      1.0
+    ]
+  },
+  "target_spacing_zyx": [
+    0.9999988079071045,
+    0.9375,
+    0.9375
+  ],
+  "resampled_dims_zyx": [
+    12,
+    17,
+    21
+  ],
+  "resampled_spot_checks": {
+    "0_0_0": 0.0,
+    "0_8_10": 159.5,
+    "5_8_10": 1759.5,
+    "last": 3839.0
+  },
+  "normalization": {
+    "lo": 19.16386604309082,
+    "hi": 3820.0,
+    "mean": 1919.9444580078125,
+    "std": 1108.0914306640625
+  },
+  "normalized_spot_checks": {
+    "0_0_0": -1.7153644561767578,
+    "5_8_10": -0.1447935253381729,
+    "last": 1.7147101163864136
+  }
+}

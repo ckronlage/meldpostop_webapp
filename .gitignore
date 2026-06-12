@@ -1,0 +1,8 @@
+node_modules/
+web/models/*.onnx
+web/wasm/
+web/coi-serviceworker.js
+*.pyc
+__pycache__/
+.DS_Store
+.claude/

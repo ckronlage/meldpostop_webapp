@@ -1,0 +1,78 @@
+{
+  "description": "fold 0 ONNX inference on preprocessed test volume (onnxruntime-python)",
+  "preprocessed_shape_zyx": [
+    12,
+    17,
+    21
+  ],
+  "original_shape_zyx": [
+    12,
+    16,
+    20
+  ],
+  "pad_left_zyx": [
+    58,
+    71,
+    45
+  ],
+  "pad_right_zyx": [
+    58,
+    72,
+    46
+  ],
+  "padded_shape_zyx": [
+    128,
+    160,
+    112
+  ],
+  "logit_range_full_patch": {
+    "bg_min": -2.8613717555999756,
+    "bg_max": 117.97602081298828,
+    "cavity_min": -117.95368194580078,
+    "cavity_max": 2.8615434169769287
+  },
+  "spot_checks": {
+    "0_0_0": {
+      "logit_bg": 75.55852508544922,
+      "logit_cavity": -75.54936981201172,
+      "softmax_bg": 1.0,
+      "softmax_cavity": 2.3696001791765535e-66
+    },
+    "5_8_10": {
+      "logit_bg": 16.837203979492188,
+      "logit_cavity": -16.835220336914062,
+      "softmax_bg": 0.9999999999999976,
+      "softmax_cavity": 2.3782194525262437e-15
+    },
+    "11_16_20": {
+      "logit_bg": 10.977338790893555,
+      "logit_cavity": -10.976713180541992,
+      "softmax_bg": 0.9999999997079372,
+      "softmax_cavity": 2.9206288661515535e-10
+    }
+  },
+  "seg_back_resampling": {
+    "description": "endpoint-aligned NN resample from resampled to original space",
+    "box_centre_zyx": [
+      6,
+      8,
+      10
+    ],
+    "box_radii_zyx": [
+      3,
+      4,
+      4
+    ],
+    "src_spot_checks": {
+      "0_0_0": 0,
+      "6_8_10": 1,
+      "3_4_6": 1,
+      "11_16_20": 0
+    },
+    "back_spot_checks": {
+      "0_0_0": 0,
+      "6_8_10": 1,
+      "11_15_19": 0
+    }
+  }
+}

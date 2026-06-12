@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MELD-PostOp – Resection Cavity Segmentation</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      font-size: 14px;
+      background: #1a1a2e;
+      color: #e0e0e0;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    /* ── Header ── */
+    header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 10px 16px;
+      background: #16213e;
+      border-bottom: 1px solid #0f3460;
+      flex-shrink: 0;
+    }
+    header h1 { font-size: 18px; font-weight: 600; color: #e94560; }
+    header p  { font-size: 12px; color: #888; }
+    header .spacer { flex: 1; }
+
+    /* ── Layout ── */
+    .main-layout {
+      display: flex;
+      flex: 1;
+      overflow: hidden;
+    }
+
+    /* ── Sidebar ── */
+    aside {
+      width: 260px;
+      flex-shrink: 0;
+      background: #16213e;
+      border-right: 1px solid #0f3460;
+      display: flex;
+      flex-direction: column;
+      gap: 0;
+      overflow-y: auto;
+    }
+    .section {
+      border-bottom: 1px solid #0f3460;
+      padding: 14px;
+    }
+    .section h2 {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: #888;
+      margin-bottom: 10px;
+    }
+
+    /* ── Drop zone ── */
+    #drop-zone {
+      border: 2px dashed #0f3460;
+      border-radius: 6px;
+      padding: 20px 12px;
+      text-align: center;
+      color: #888;
+      cursor: pointer;
+      transition: border-color 0.15s, color 0.15s;
+      font-size: 12px;
+      line-height: 1.5;
+    }
+    #drop-zone.over, #drop-zone:hover { border-color: #e94560; color: #e0e0e0; }
+    #drop-zone input { display: none; }
+
+    /* ── File info ── */
+    #file-info {
+      margin-top: 8px;
+      font-size: 11px;
+      color: #aaa;
+      word-break: break-all;
+      display: none;
+    }
+
+    /* ── Progress ── */
+    #progress-wrap { display: none; margin-top: 4px; }
+    #progress-bar-bg {
+      background: #0f3460;
+      border-radius: 4px;
+      height: 6px;
+      overflow: hidden;
+    }
+    #progress-bar {
+      height: 100%;
+      width: 0%;
+      background: #e94560;
+      transition: width 0.2s;
+      border-radius: 4px;
+    }
+    #progress-text { font-size: 11px; color: #888; margin-top: 4px; }
+
+    /* ── Buttons ── */
+    button {
+      width: 100%;
+      padding: 8px 12px;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 500;
+      transition: opacity 0.15s;
+    }
+    button:disabled { opacity: 0.4; cursor: not-allowed; }
+    .btn-primary   { background: #e94560; color: #fff; }
+    .btn-secondary { background: #0f3460; color: #e0e0e0; margin-top: 8px; }
+    .btn-primary:not(:disabled):hover   { opacity: 0.85; }
+    .btn-secondary:not(:disabled):hover { opacity: 0.85; }
+
+    /* ── Viewer ── */
+    #viewer-wrap {
+      flex: 1;
+      position: relative;
+      background: #000;
+    }
+    #niivue-canvas {
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+    #viewer-placeholder {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #444;
+      font-size: 13px;
+      pointer-events: none;
+    }
+
+    /* ── Console ── */
+    #console-wrap {
+      height: 140px;
+      flex-shrink: 0;
+      background: #0d0d1a;
+      border-top: 1px solid #0f3460;
+      overflow-y: auto;
+      padding: 8px 12px;
+      font-family: 'Menlo', 'Monaco', monospace;
+      font-size: 11px;
+      color: #aaa;
+    }
+    #console-wrap .log-line { line-height: 1.6; }
+    #console-wrap .log-line.err { color: #e94560; }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>MELD-PostOp</h1>
+      <p>Resection cavity segmentation · fold 0</p>
+    </div>
+    <div class="spacer"></div>
+    <button id="dl-btn" class="btn-secondary" style="width:auto;padding:6px 14px;" disabled>
+      Download mask
+    </button>
+  </header>
+
+  <div class="main-layout">
+    <aside>
+      <div class="section">
+        <h2>Input</h2>
+        <input type="file" id="file-input" accept=".nii,.nii.gz" style="display:none" />
+        <div id="drop-zone">
+          Drop post-op T1w NIfTI here<br/>or <u>click to browse</u>
+        </div>
+        <div id="file-info"></div>
+      </div>
+
+      <div class="section">
+        <h2>Run</h2>
+        <button id="run-btn" class="btn-primary" disabled>Run segmentation</button>
+        <div id="progress-wrap">
+          <div id="progress-bar-bg"><div id="progress-bar"></div></div>
+          <div id="progress-text"></div>
+        </div>
+      </div>
+    </aside>
+
+    <div id="viewer-wrap">
+      <canvas id="niivue-canvas"></canvas>
+      <div id="viewer-placeholder">Load a NIfTI to begin</div>
+    </div>
+  </div>
+
+  <div id="console-wrap"></div>
+
+  <script src="./coi-serviceworker.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@niivue/niivue@0.46.0/dist/niivue.umd.min.js" crossorigin="anonymous"></script>
+  <script type="module" src="./main.js"></script>
+</body>
+</html>

@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>MELD-PostOp – NIfTI reader test</title>
+  <style>
+    body { font-family: monospace; background: #111; color: #ccc; padding: 1rem 2rem; }
+    h1   { color: #e94560; font-size: 1.1rem; margin-bottom: 1.5rem; }
+    .suite { margin-bottom: 2rem; }
+    .suite h2 { color: #7fb3ff; font-size: 0.95rem; border-bottom: 1px solid #333; padding-bottom: 4px; }
+    .case  { margin: 4px 0 4px 1rem; line-height: 1.6; }
+    .pass  { color: #4caf50; }
+    .fail  { color: #e94560; }
+    .info  { color: #aaa; margin: 4px 0 4px 1rem; }
+    #summary { margin-top: 1.5rem; font-size: 1.1rem; font-weight: bold; }
+  </style>
+</head>
+<body>
+  <h1>MELD-PostOp – NIfTI reader test</h1>
+  <p class="info">Tests that <code>parseNifti()</code> in <code>nifti.js</code>
+     returns the same shape, spacing and voxel values as Python's SimpleITKIO.</p>
+  <div id="output"></div>
+  <div id="summary"></div>
+
+  <script src="./coi-serviceworker.js"></script>
+  <script type="module">
+    import { decompressIfGzip, parseNifti } from './nifti.js';
+    import { resampleTrilinear, foregroundZScore,
+             resampleNearestNeighbor, logitsToSegmentation } from './preprocess.js';
+
+    // ── Minimal test harness ───────────────────────────────────────────────
+    const results = [];
+    const out     = document.getElementById('output');
+
+    function suite(name) {
+      const el = document.createElement('div');
+      el.className = 'suite';
+      el.innerHTML = `<h2>${name}</h2>`;
+      out.appendChild(el);
+      return el;
+    }
+
+    function check(container, label, got, expected, opts = {}) {
+      const tol   = opts.tol ?? 0;
+      const pass  = tol
+        ? Math.abs(got - expected) <= tol
+        : (Array.isArray(got)
+            ? JSON.stringify(got) === JSON.stringify(expected)
+            : got === expected);
+      results.push(pass);
+      const div = document.createElement('div');
+      div.className = 'case ' + (pass ? 'pass' : 'fail');
+      div.textContent = (pass ? '✓' : '✗') + '  ' + label
+        + (pass ? '' : `\n     got:      ${JSON.stringify(got)}\n     expected: ${JSON.stringify(expected)}`);
+      container.appendChild(div);
+    }
+
+    function info(container, msg) {
+      const div = document.createElement('div');
+      div.className = 'info';
+      div.textContent = msg;
+      container.appendChild(div);
+    }
+
+    // ── Fetch test assets ──────────────────────────────────────────────────
+    let niiBuf, expected;
+    try {
+      [niiBuf, expected] = await Promise.all([
+        fetch('/data/tests/test_gradient.nii').then(r => {
+          if (!r.ok) throw new Error(`HTTP ${r.status} for test_gradient.nii`);
+          return r.arrayBuffer();
+        }),
+        fetch('/data/tests/test_gradient_expected.json').then(r => {
+          if (!r.ok) throw new Error(`HTTP ${r.status} for test_gradient_expected.json`);
+          return r.json();
+        }),
+      ]);
+    } catch (e) {
+      out.innerHTML = `<div class="fail">Failed to load test assets: ${e.message}<br>
+        Run <code>python scripts/create_test_data.py</code> first.</div>`;
+      document.getElementById('summary').textContent = '⚠ Test assets missing';
+      throw e;
+    }
+
+    // ── Suite 1: parseNifti on the gradient volume ─────────────────────────
+    const nii    = parseNifti(niiBuf);
+    const s1     = suite('parseNifti() — test_gradient.nii');
+
+    info(s1, `Expected by Python (SimpleITKIO):`);
+    info(s1, `  dims_zyx   = ${JSON.stringify(expected.dims_zyx)}`);
+    info(s1, `  pixdim_zyx = ${JSON.stringify(expected.pixdim_zyx)}`);
+    info(s1, `Got from JS:`);
+    info(s1, `  dims       = ${JSON.stringify(nii.dims)}`);
+    info(s1, `  pixdim     = ${JSON.stringify(nii.pixdim)}`);
+    info(s1, `  origDims   = ${JSON.stringify(nii.origDims)}`);
+
+    check(s1, 'dims   == [nz, ny, nx]   (SimpleITK z-first order)',
+          nii.dims,     expected.dims_zyx);
+    check(s1, 'pixdim == [sz, sy, sx]',
+          nii.pixdim.map(v => +v.toFixed(6)),
+          expected.pixdim_zyx.map(v => +v.toFixed(6)));
+    check(s1, 'origDims == [nx, ny, nz]  (raw NIfTI header order)',
+          nii.origDims, expected.nifti_dims_xyz);
+
+    // ── Suite 2: voxel values ──────────────────────────────────────────────
+    const s2 = suite('Voxel values — flat index matches z*ny*nx + y*nx + x');
+
+    info(s2, 'data[i] where i = z*(ny*nx) + y*nx + x (ZYX linear index)');
+
+    const sc = expected.spot_checks;
+    check(s2, 'data[0]    == 0    (z=0,y=0,x=0)',    nii.data[0],    sc['data[0]']);
+    check(s2, 'data[1]    == 1    (z=0,y=0,x=1)',    nii.data[1],    sc['data[1]']);
+    check(s2, 'data[20]   == 20   (z=0,y=1,x=0)',    nii.data[20],   sc['data[20]']);
+    check(s2, 'data[320]  == 320  (z=1,y=0,x=0)',    nii.data[320],  sc['data[320]']);
+    check(s2, 'data[3839] == 3839 (last voxel)',      nii.data[3839], sc['data[3839]']);
+
+    // ── Suite 3: .nii.gz decompression ────────────────────────────────────
+    const s3 = suite('.nii.gz decompression');
+    const buf2 = await decompressIfGzip(niiBuf);  // plain .nii → returns same buffer
+    check(s3, 'decompressIfGzip on plain .nii returns same buffer',
+          buf2.byteLength, niiBuf.byteLength);
+
+    // ── Suite 4: PreprocessAdapterFromNpy — resampleTrilinear ─────────────
+    let preprocNii2Buf, preprocExpected;
+    try {
+      [preprocNii2Buf, preprocExpected] = await Promise.all([
+        fetch('/data/tests/test_preprocess.nii').then(r => {
+          if (!r.ok) throw new Error(`HTTP ${r.status}`);
+          return r.arrayBuffer();
+        }),
+        fetch('/data/tests/test_preprocess_expected.json').then(r => {
+          if (!r.ok) throw new Error(`HTTP ${r.status}`);
+          return r.json();
+        }),
+      ]);
+    } catch (e) {
+      out.innerHTML += `<div class="fail">Failed to load preprocess test assets: ${e.message}</div>`;
+      preprocExpected = null;
+    }
+
+    if (preprocExpected) {
+      const nii2 = parseNifti(preprocNii2Buf);
+      const TARGET_SPACING = preprocExpected.target_spacing_zyx;
+      const resamp = resampleTrilinear(nii2.data, nii2.dims, nii2.pixdim, TARGET_SPACING);
+
+      const s4 = suite('resampleTrilinear() — test_preprocess.nii (1mm iso → target spacing)');
+      const expDims = preprocExpected.resampled_dims_zyx;
+      const sc2     = preprocExpected.resampled_spot_checks;
+
+      info(s4, `Input dims (zyx): ${JSON.stringify(nii2.dims)},  spacing: ${JSON.stringify(nii2.pixdim)}`);
+      info(s4, `Expected output dims: ${JSON.stringify(expDims)}`);
+      info(s4, `Got output dims:      ${JSON.stringify(resamp.dims)}`);
+
+      check(s4, 'output dims == [12, 17, 21]', resamp.dims, expDims);
+
+      const TOL = 1e-3;  // float32 precision
+      const [dD, dH, dW] = resamp.dims;
+      check(s4, 'data[0,0,0]  == 0.0       (first voxel, no interpolation)',
+            resamp.data[0], sc2['0_0_0'], { tol: TOL });
+      check(s4, 'data[0,8,10] == 159.5     (fractional y=7.5, x=9.5, exact for linear fn)',
+            resamp.data[0 * dH * dW + 8 * dW + 10], sc2['0_8_10'], { tol: TOL });
+      check(s4, 'data[5,8,10] == 1759.5    (interior, all axes fractional)',
+            resamp.data[5 * dH * dW + 8 * dW + 10], sc2['5_8_10'], { tol: TOL });
+      check(s4, 'data[last]   == 3839.0    (last voxel, endpoint alignment)',
+            resamp.data[(dD - 1) * dH * dW + (dH - 1) * dW + (dW - 1)], sc2['last'], { tol: TOL });
+
+      // ── Suite 5: foregroundZScore ────────────────────────────────────────
+      const normResult = foregroundZScore(resamp.data);
+      const s5    = suite('foregroundZScore() — normalization statistics');
+      const expN  = preprocExpected.normalization;
+      const expNS = preprocExpected.normalized_spot_checks;
+
+      // lo/hi are order-statistics: one-position shift in a 4283-element sorted
+      // array spans ~(3839/4283)≈0.9 value units. skimage and our trilinear
+      // differ in the least-significant float32 bits at a few edge voxels,
+      // which can shift the 0.5th-percentile index by ±1 → allow ±2.0 for lo.
+      // std varies by ~0.003 % due to float32 summation order → allow ±2.0.
+      const LO_TOL   = 2.0;
+      const STAT_TOL = 2.0;
+      const VAL_TOL  = 0.01;  // normalized output values must agree closely
+
+      info(s5, `Expected: lo=${expN.lo.toFixed(2)}, hi=${expN.hi.toFixed(2)}, mean=${expN.mean.toFixed(4)}, std=${expN.std.toFixed(4)}`);
+      info(s5, `Got:      lo=${normResult.lo.toFixed(2)}, hi=${normResult.hi.toFixed(2)}, mean=${normResult.mean.toFixed(4)}, std=${normResult.std.toFixed(4)}`);
+
+      check(s5, 'lo  (0.5th percentile clip, tol ±2.0)',  normResult.lo,   expN.lo,   { tol: LO_TOL });
+      check(s5, 'hi  (99.5th percentile clip)',            normResult.hi,   expN.hi,   { tol: LO_TOL });
+      check(s5, 'mean of clipped foreground',              normResult.mean, expN.mean, { tol: VAL_TOL });
+      check(s5, 'std  of clipped foreground (tol ±2.0)',   normResult.std,  expN.std,  { tol: STAT_TOL });
+
+      check(s5, 'normalized data[0,0,0]  matches Python',
+            normResult.data[0], expNS['0_0_0'], { tol: VAL_TOL });
+      check(s5, 'normalized data[5,8,10] matches Python',
+            normResult.data[5 * dH * dW + 8 * dW + 10], expNS['5_8_10'], { tol: VAL_TOL });
+      check(s5, 'normalized data[last]   matches Python',
+            normResult.data[(dD - 1) * dH * dW + (dH - 1) * dW + (dW - 1)], expNS['last'], { tol: VAL_TOL });
+    }
+
+    // ── Suite 6: ONNX model inference (fold 0, single padded patch) ───────────
+    //
+    // Reproduces exactly what scripts/create_inference_test_data.py does:
+    //   preprocess test_preprocess.nii → pad to [128,160,112] → fold0 → spot checks
+    // Comparison: onnxruntime-python (CPU) vs onnxruntime-web (WASM).
+    // Logit values are large floats (~75); allow ±0.05 for float32 rounding.
+
+    let infExpected;
+    try {
+      infExpected = await fetch('/data/tests/test_inference_expected.json')
+        .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); });
+    } catch (e) {
+      out.innerHTML += `<div class="fail">test_inference_expected.json missing — run scripts/create_inference_test_data.py</div>`;
+      infExpected = null;
+    }
+
+    if (infExpected && preprocExpected) {
+      const PATCH = [128, 160, 112];
+      // Interior voxels agree to <0.01. Corner voxels (at the boundary between
+      // the data region and zero-padding) show up to ~0.15 divergence: CPU and
+      // WASM SIMD accumulate boundary convolutions in slightly different FP order.
+      // This only occurs in this artificial test (data << patch); real MRI fills
+      // the full patch so there is no zero-padding boundary inside the model input.
+      const LTOL  = 0.2;    // logit tolerance (float32 CPU vs WASM, boundary voxels)
+
+      function padSymmetric(data, dims, patch) {
+        const [D, H, W] = dims;
+        const [pD, pH, pW] = patch;
+        const padZ = Math.max(0, pD - D), padY = Math.max(0, pH - H), padX = Math.max(0, pW - W);
+        const plZ = padZ >> 1, plY = padY >> 1, plX = padX >> 1;
+        const nD = D + padZ, nH = H + padY, nW = W + padX;
+        const padded = new Float32Array(nD * nH * nW);
+        for (let z = 0; z < D; z++)
+          for (let y = 0; y < H; y++) {
+            const src = z * H * W + y * W;
+            const dst = (z + plZ) * nH * nW + (y + plY) * nW + plX;
+            padded.set(data.subarray(src, src + W), dst);
+          }
+        return { data: padded, dims: [nD, nH, nW], pl: [plZ, plY, plX] };
+      }
+
+      const s6 = suite('ONNX inference — fold 0 (single padded patch vs onnxruntime-python)');
+      info(s6, 'Loading fold 0 model (~117 MB) — may take a moment…');
+
+      try {
+        const ort = await import('./wasm/ort.webgpu.bundle.min.mjs');
+        ort.env.wasm.wasmPaths = '/web/wasm/';
+
+        const sess = await ort.InferenceSession.create('./models/meld_postop_fold0.onnx', {
+          executionProviders: ['wasm'],
+          graphOptimizationLevel: 'all',
+        });
+
+        // Re-run preprocessing (verified correct in suites 4-5)
+        const nii3  = parseNifti(preprocNii2Buf);
+        const rsp3  = resampleTrilinear(nii3.data, nii3.dims, nii3.pixdim,
+                                        preprocExpected.target_spacing_zyx);
+        const nrm3  = foregroundZScore(rsp3.data);
+        const [D3, H3, W3] = rsp3.dims;
+
+        const padded = padSymmetric(nrm3.data, [D3, H3, W3], PATCH);
+        const [pD, pH, pW] = padded.dims;
+        const [plZ, plY, plX] = padded.pl;
+        info(s6, `Padded [${pD},${pH},${pW}], pad_left=[${plZ},${plY},${plX}]`);
+
+        const tensor = new ort.Tensor('float32', padded.data, [1, 1, pD, pH, pW]);
+        const result = await sess.run({ [sess.inputNames[0]]: tensor });
+        const logits = result[sess.outputNames[0]].data;   // [2, pD, pH, pW] class-first
+        const pN = pD * pH * pW;
+
+        for (const [key, exp] of Object.entries(infExpected.spot_checks)) {
+          const [oz, oy, ox] = key.split('_').map(Number);
+          const li = (oz + plZ) * pH * pW + (oy + plY) * pW + (ox + plX);
+          check(s6, `logit_bg     at (${oz},${oy},${ox})`,
+                logits[li],      exp.logit_bg,     { tol: LTOL });
+          check(s6, `logit_cavity at (${oz},${oy},${ox})`,
+                logits[pN + li], exp.logit_cavity, { tol: LTOL });
+        }
+
+      } catch (e) {
+        const div = document.createElement('div');
+        div.className = 'fail';
+        div.textContent = `✗  Inference test error: ${e.message}`;
+        s6.appendChild(div);
+        results.push(false);
+        console.error(e);
+      }
+    }
+
+    // ── Suite 7: logitsToSegmentation — argmax + NN back-resample ─────────────
+    //
+    // Tests convert_predicted_logits_to_segmentation_with_correct_shape():
+    //   1. argmax over nClasses softmax values
+    //   2. endpoint-aligned nearest-neighbour resample to original space
+    // Reference: skimage.transform.resize(order=0, mode='edge') on a
+    // synthetic binary mask, recorded in test_inference_expected.json.
+
+    if (infExpected) {
+      const sbr = infExpected.seg_back_resampling;
+      const s7  = suite('logitsToSegmentation — argmax + NN back-resample vs skimage order=0');
+
+      // ── 7a: resampleNearestNeighbor with synthetic mask ──────────────────
+      const [D7, H7, W7]   = infExpected.preprocessed_shape_zyx;   // [12,17,21]
+      const origDims7       = infExpected.original_shape_zyx;        // [12,16,20]
+      const [cz, cy, cx]   = sbr.box_centre_zyx;
+      const [rz, ry, rx]   = sbr.box_radii_zyx;
+
+      // Reconstruct the same synthetic mask the Python script built
+      const segSrc = new Uint8Array(D7 * H7 * W7);
+      for (let z = Math.max(0, cz - rz); z < Math.min(D7, cz + rz); z++)
+        for (let y = Math.max(0, cy - ry); y < Math.min(H7, cy + ry); y++)
+          for (let x = Math.max(0, cx - rx); x < Math.min(W7, cx + rx); x++)
+            segSrc[z * H7 * W7 + y * W7 + x] = 1;
+
+      // Verify JS reproduces the same src values Python used
+      for (const [key, expected] of Object.entries(sbr.src_spot_checks)) {
+        const [z, y, x] = key.split('_').map(Number);
+        check(s7, `seg_src[${z},${y},${x}] == ${expected} (synthetic mask)`,
+              segSrc[z * H7 * W7 + y * W7 + x], expected);
+      }
+
+      // Back-resample and compare to Python skimage reference
+      const segBack = resampleNearestNeighbor(segSrc, [D7, H7, W7], origDims7);
+      const [, dH7, dW7] = origDims7;
+      for (const [key, expected] of Object.entries(sbr.back_spot_checks)) {
+        const [z, y, x] = key.split('_').map(Number);
+        check(s7, `seg_back[${z},${y},${x}] == ${expected} (vs skimage order=0)`,
+              segBack[z * dH7 * dW7 + y * dW7 + x], expected);
+      }
+
+      // ── 7b: logitsToSegmentation argmax ──────────────────────────────────
+      // Create synthetic softmax: voxel 0 bg-dominant, voxel 1 cavity-dominant
+      // Layout interleaved: [bg0, cav0, bg1, cav1]
+      const synSoft = new Float32Array([0.9, 0.1,   // voxel 0 → bg (class 0)
+                                        0.3, 0.7]);  // voxel 1 → cavity (class 1)
+      const synDims  = [1, 1, 2];   // tiny 1×1×2 volume
+      const synMask  = logitsToSegmentation(synSoft, synDims, synDims, 2);
+      check(s7, 'argmax voxel 0 (bg-dominant)     → label 0',  synMask[0], 0);
+      check(s7, 'argmax voxel 1 (cavity-dominant) → label 1',  synMask[1], 1);
+    }
+
+    // ── Summary ────────────────────────────────────────────────────────────
+    const passed = results.filter(Boolean).length;
+    const total  = results.length;
+    const sumEl  = document.getElementById('summary');
+    sumEl.className = passed === total ? 'pass' : 'fail';
+    sumEl.textContent = `${passed} / ${total} tests passed`;
+</script>
+</body>
+</html>
