@@ -167,12 +167,23 @@ runBtn.addEventListener('click', async () => {
 });
 
 // ── Download button ────────────────────────────────────────────────────────
-dlBtn.addEventListener('click', () => {
+dlBtn.addEventListener('click', async () => {
   if (!maskObjectURL) return;
-  const a = document.createElement('a');
-  a.href = maskObjectURL;
-  a.download = loadedFile
+  const filename = loadedFile
     ? loadedFile.name.replace(/\.nii(\.gz)?$/, '_meld_postop_mask.nii')
     : 'meld_postop_mask.nii';
-  a.click();
+
+  if (window.electronAPI?.saveMask) {
+    // Electron: native Save As dialog
+    const res = await fetch(maskObjectURL);
+    const buf = await res.arrayBuffer();
+    const saved = await window.electronAPI.saveMask(buf, filename);
+    if (saved) log(`Saved as ${filename}`);
+  } else {
+    // Browser: trigger <a> download
+    const a = document.createElement('a');
+    a.href = maskObjectURL;
+    a.download = filename;
+    a.click();
+  }
 });

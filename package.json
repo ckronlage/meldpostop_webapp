@@ -1,0 +1,16 @@
+{
+  "name": "meld-postop",
+  "version": "1.0.0",
+  "description": "MELD-PostOp resection cavity segmentation",
+  "main": "electron/main.js",
+  "type": "module",
+  "scripts": {
+    "start": "electron ."
+  },
+  "devDependencies": {
+    "electron": "^42.0.0"
+  },
+  "allowScripts": {
+    "electron@42.4.0": true
+  }
+}
