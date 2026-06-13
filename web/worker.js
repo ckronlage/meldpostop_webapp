@@ -7,6 +7,7 @@
  *   3. Foreground z-score normalisation
  *   4. Sliding-window ONNX inference (patch 128×160×112, 50 % overlap)
  *      repeated for all 5 folds, softmax outputs averaged (ensemble)
+ *      Backend: WASM (WebGPU EP lacks 3D ConvTranspose support as of ORT 1.21).
  *   5. Argmax → binary mask
  *   6. Resample mask back to original spacing
  *   7. Encode result as NIfTI-1 and post as stageData
@@ -23,7 +24,7 @@ import { resampleTrilinear, foregroundZScore, logitsToSegmentation } from './pre
 const MODEL_URLS = [0].map(i => `./models/meld_postop_fold${i}.onnx`); // fold 0 only for now
 const TARGET_SPACING = [0.9999988079071045, 0.9375, 0.9375]; // mm, from plans.json
 const PATCH_SIZE = [128, 160, 112];
-const PATCH_OVERLAP = 0.5; // 50 % overlap per axis
+const PATCH_OVERLAP = 0.5; // 50 % overlap per axis (nnU-Net default)
 const N_CLASSES = 2; // background + resection cavity
 
 // ── Globals ────────────────────────────────────────────────────────────────
@@ -60,6 +61,10 @@ self.onmessage = async ({ data }) => {
 async function handleInit() {
   ort.env.wasm.wasmPaths = '/web/wasm/';
   sessions = [];
+
+  // WebGPU, WebNN, and WebGL EPs all support only 2-D Conv/ConvTranspose.
+  // nnU-Net 3d_fullres uses 3-D ConvTranspose throughout → WASM is the only
+  // viable backend for this model.
   for (let i = 0; i < MODEL_URLS.length; i++) {
     log(`Loading fold ${i} / ${MODEL_URLS.length - 1}…`);
     progress((i + 0.5) / MODEL_URLS.length, `Loading model fold ${i}`);

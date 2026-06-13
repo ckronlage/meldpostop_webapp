@@ -5,7 +5,7 @@
 set -e
 cd "$(dirname "$0")"
 
-ORT_VERSION="1.21.0"
+ORT_VERSION="1.26.0"
 ORT_BASE="https://cdn.jsdelivr.net/npm/onnxruntime-web@${ORT_VERSION}/dist"
 
 mkdir -p wasm
@@ -15,6 +15,8 @@ for f in \
   ort.webgpu.bundle.min.mjs \
   ort-wasm-simd-threaded.mjs \
   ort-wasm-simd-threaded.wasm \
+  ort-wasm-simd-threaded.asyncify.mjs \
+  ort-wasm-simd-threaded.asyncify.wasm \
   ort-wasm-simd-threaded.jsep.mjs \
   ort-wasm-simd-threaded.jsep.wasm
 do
