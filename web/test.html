@@ -241,7 +241,7 @@
 
       try {
         const ort = await import('./wasm/ort.webgpu.bundle.min.mjs');
-        ort.env.wasm.wasmPaths = '/web/wasm/';
+        ort.env.wasm.wasmPaths = new URL('./wasm/', import.meta.url).href;
 
         const sess = await ort.InferenceSession.create('./models/meld_postop_fold0.onnx', {
           executionProviders: ['wasm'],

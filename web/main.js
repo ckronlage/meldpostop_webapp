@@ -109,8 +109,6 @@ function initWorker() {
           new Blob([data.data], { type: 'application/octet-stream' }),
         );
 
-        // Reload base + mask together via loadVolumes (the canonical NiiVue API
-        // for multiple volumes; addVolume expects an NVImage object in v0.46).
         // cal_min=0.5 makes value=0 (background) transparent; cal_max=1.0 maps
         // value=1 to the maximum warm colormap entry (fully coloured).
         await nv.loadVolumes([

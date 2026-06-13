@@ -6,8 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ```bash
 # Start dev server (Python 3, no dependencies)
-python serve.py          # → http://localhost:8080/web/
-                         # → http://localhost:8080/web/test.html  (unit tests)
+python3 -m http.server 8080   # from repo root → http://localhost:8080/web/
+                               #                 → http://localhost:8080/web/test.html
 
 # Download ONNX Runtime WASM files (one-time setup)
 bash web/setup.sh
@@ -37,7 +37,7 @@ The worker pipeline maps directly to nnU-Net v2's `predict_single_npy_array()`:
 1. `parseNifti` (nifti.js) → float32 data + header
 2. `resampleTrilinear` (preprocess.js) → 1 mm isotropic target spacing
 3. `foregroundZScore` (preprocess.js) → z-score normalisation on non-zero voxels
-4. `slidingWindowInference` (worker.js) → softmax accumulation with Gaussian weighting
+4. `slidingWindowInference` (inference.js) → softmax accumulation with Gaussian weighting
 5. `logitsToSegmentation` (preprocess.js) → argmax + nearest-neighbour back-resample
 
 ### Axis convention throughout: (z, y, x) / (D, H, W)
@@ -50,13 +50,13 @@ Both `resampleTrilinear` and `resampleNearestNeighbor` use `src = dst * (sN-1)/(
 
 ### SharedArrayBuffer requirement
 
-ONNX Runtime Web with WASM threading requires `SharedArrayBuffer`, which the browser only allows when the page is served with `Cross-Origin-Opener-Policy: same-origin` and `Cross-Origin-Embedder-Policy: require-corp`. `serve.py` injects these headers on every response. `web/coi-serviceworker.js` handles the case where the server cannot set them (e.g. GitHub Pages).
+ONNX Runtime Web with WASM threading requires `SharedArrayBuffer`, which the browser only allows when the page is served with `Cross-Origin-Opener-Policy: same-origin` and `Cross-Origin-Embedder-Policy: require-corp`. `web/coi-serviceworker.js` injects these headers via a service worker when the server does not set them (works on `localhost` and GitHub Pages; does not work on `file://`).
 
 **Why not WebGPU?** The ONNX Runtime Web WebGPU EP explicitly lists "ConvTranspose3d is not supported" in its operator table (confirmed up to v1.26). The nnU-Net 3d_fullres decoder uses 3D `ConvTranspose` throughout, so WebGPU fails at inference time with "currently only support 2-dimensional conv". WASM is the only viable backend for this model until the WebGPU EP adds 3D conv support.
 
 ### NiiVue overlay display
 
-Overlay volumes must be loaded via `nv.loadVolumes([base, mask])` — in v0.46.0, `nv.addVolume(plainObject)` expects an `NVImage` instance, not a descriptor, and fails silently. The mask header must explicitly set `cal_max=1` / `cal_min=0` (bytes 124/128) because `encodeNifti` copies the T1w header verbatim and the T1w's display window would map the {0,1} mask values to near-invisible intensities.
+Overlay volumes are loaded via `nv.loadVolumes([base, mask])`. The mask header must explicitly set `cal_max=1` / `cal_min=0` (bytes 124/128) because `encodeNifti` copies the T1w header verbatim and the T1w's display window would map the {0,1} mask values to near-invisible intensities.
 
 ### Model files
 
