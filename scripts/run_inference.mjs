@@ -11,11 +11,11 @@
  * Usage:
  *   # Single file
  *   node scripts/run_inference.mjs --input scan.nii.gz --output mask.nii \
- *     [--model-dir web/models/] [--folds 0]
+ *     [--model-dir web/models/] [--folds 0] [--threads 4]
  *
  *   # Batch (input directory → output directory)
  *   node scripts/run_inference.mjs --input-dir /data/scans/ --output-dir /data/masks/ \
- *     [--model-dir web/models/] [--folds 0,1,2,3,4]
+ *     [--model-dir web/models/] [--folds 0,1,2,3,4] [--threads 4]
  *
  * --folds  Comma-separated fold indices to load (default: 0).
  *          Use 0,1,2,3,4 for the full 5-fold ensemble.
@@ -53,6 +53,7 @@ const args = parseArgs(process.argv.slice(2));
 
 const modelDir  = args['model-dir'] ?? 'web/models/';
 const foldList  = (args['folds'] ?? '0').split(',').map(Number);
+const numThreads = args['threads'] ? parseInt(args['threads'], 10) : 0; // 0 = ORT default
 const inputFile  = args['input']      ?? null;
 const outputFile = args['output']     ?? null;
 const inputDir   = args['input-dir']  ?? null;
@@ -92,7 +93,11 @@ async function loadSessions(foldIndices, modelDir) {
       throw new Error(`Model file not found: ${filePath}`);
     }
     log(`  Loading fold ${foldIdx} — ${quantized ? 'INT8' : 'FP32'}: ${path.basename(filePath)}`);
-    const sess = await ort.InferenceSession.create(filePath);
+    const sessionOptions = {};
+    if (numThreads > 0) {
+      sessionOptions.intraOpNumThreads = numThreads;
+    }
+    const sess = await ort.InferenceSession.create(filePath, sessionOptions);
     sessions.push(sess);
   }
   return sessions;

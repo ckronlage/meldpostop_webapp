@@ -6,3 +6,4 @@ web/coi-serviceworker.js
 __pycache__/
 .DS_Store
 .claude/
+data/
